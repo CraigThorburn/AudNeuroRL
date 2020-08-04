@@ -1,3 +1,5 @@
+import numpy as np
+
 def initialize_data(DATA_FILE, PHONES):
     with open(DATA_FILE, 'r') as f:
         input_data = f.read().splitlines()
@@ -10,15 +12,15 @@ def initialize_data(DATA_FILE, PHONES):
     phone_vectors = {}
     for i in range(num_phones):
         vector = np.zeros(num_phones)
-        vector[i+1] += 1
+        vector[i] += 1
         phone_vectors[phone_list[i]] = vector
 
     return input_data, phone_vectors
-def get_episode():
+def get_episode(input_data, i_episode):
     current_episode = input_data[i_episode]
     return current_episode
 
-def get_state():
-    current_state = input_data[t]
+def get_state(current_episode, t):
+    current_state = current_episode.split(' ')[t+1]
     return current_state
 
