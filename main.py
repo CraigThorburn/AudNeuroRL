@@ -16,7 +16,7 @@ import torchvision.transforms as T
 from ReplayMemory import *
 from DQN import *
 from process_data import *
-#from model import *
+from Vocabulary import *
 
 BATCH_SIZE = 128
 GAMMA = 0.999
@@ -25,8 +25,13 @@ EPS_END = 0.05
 EPS_DECAY = 200
 TARGET_UPDATE = 10
 
-DATA_FILE = '/mnt/c/files/research/projects/aud_neuro/data/WSJ_phones.txt'
+VOCAB_SAMPLE = 10
+VOCAB_CALCULATE = 1
+
+DATA_FILE = '/mnt/c/files/research/projects/aud_neuro/data/WSJ_phones_test.txt'
 PHONES = '/mnt/c/files/research/projects/aud_neuro/data/phones.txt'
+
+to_print = True
 
 def optimize_model():
 
@@ -42,9 +47,9 @@ def optimize_model():
     # (a final state would've been the one after which simulation ended)
     non_final_mask = torch.tensor(tuple(map(lambda s: s is not None,
                                           batch.next_state)), device=device, dtype=torch.bool)
-    non_final_next_states = torch.cat([s for s in batch.next_state
-                                                if s is not None])
-    state_batch = torch.cat(batch.state)
+    non_final_next_states = torch.stack(tuple([s for s in batch.next_state
+                                                if s is not None]))
+    state_batch = torch.stack(batch.state)
     action_batch = torch.cat(batch.action)
     reward_batch = torch.cat(batch.reward)
 
@@ -64,8 +69,8 @@ def optimize_model():
     expected_state_action_values = (next_state_values * GAMMA) + reward_batch
 
     # Compute Huber loss
-    loss = F.smooth_l1_loss(state_action_values, expected_state_action_values.unsqueeze(1))
-
+    loss = F.smooth_l1_loss(state_action_values.double(), expected_state_action_values.unsqueeze(1).double())
+    loss = loss.double()
     # Optimize the model
     optimizer.zero_grad()
     loss.backward()
@@ -84,7 +89,7 @@ def select_action(state):
             # t.max(1) will return largest column value of each row.
             # second column on max result is index of where max element was
             # found, so we pick action with the larger expected reward.
-            return policy_net(state).max(1)[1].view(1, 1)
+            return policy_net(state).max(0)[1].view(1, 1)
     else:
         return torch.tensor([[random.randrange(n_actions)]], device=device, dtype=torch.long)
 
@@ -107,9 +112,9 @@ n_actions = 2
 
 # Get length of file to find number of episodes
 
-input_data, phone_vectors = initialize_data(DATA_FILE, PHONES)
+input_data, phones2vectors, vectors2phones = initialize_data(DATA_FILE, PHONES)
 
-num_inputs = len(phone_vectors.keys())
+num_inputs = len(phones2vectors.keys())
 num_episodes = len(input_data)
 
 policy_net = DQN(num_inputs, n_actions).to(device)
@@ -125,31 +130,42 @@ steps_done = 0
 
 episode_durations = []
 
+vocab = Vocabulary(VOCAB_SAMPLE, VOCAB_CALCULATE)
 
 for i_episode in range(num_episodes):
     # Initialize the environment and state
 
     current_episode = get_episode(input_data, i_episode)
-    state = get_state(current_episode, 0)
+    state, symbol = get_state(current_episode, 0, phones2vectors)
+    vocab.new_episode()
 
-    current_word = []
+    if to_print:
+        print('-----------------------------------------------------------')
+        print('episode num: '+str(i_episode) + ', episode_length: '+str(len(current_episode)-1))
+        print(current_episode)
 
     for t in count():
         # Select and perform an action
         action = select_action(state)
 
-        if action == 0
+        reward = vocab.step(action, state)
 
-        elif action ==
 
-        _, reward, done, _ = env.step(action.item())
-        reward = torch.tensor([reward], device=device)
+        if to_print:
+            if action == 0:
+                print('state: '+symbol + ', action: continue')
+            else:
+                print('state: '+symbol + ', action: segment')
+                print('word: ' + vocab.get_previous_word(vectors2phones) + ', reward: ' + str(reward))
 
+        reward = torch.tensor([reward], device=device, dtype=torch.float64)
+
+        done = t+1 == len(current_episode)-1
         # Observe new state
-        if t+1 != len(current_episode):
-            next_state = get_state(current_episode+1)
+        if not done:
+            next_state, symbol = get_state(current_episode, t+1, phones2vectors)
         else:
-            next_state = None
+            next_state, symbol = None, None
 
         # Store the transition in memory
         memory.push(state, action, next_state, reward)
@@ -161,14 +177,14 @@ for i_episode in range(num_episodes):
         optimize_model()
         if done:
             episode_durations.append(t + 1)
-            plot_durations()
+            #plot_durations()
             break
     # Update the target network, copying all weights and biases in DQN
     if i_episode % TARGET_UPDATE == 0:
         target_net.load_state_dict(policy_net.state_dict())
 
 print('Complete')
-env.render()
-env.close()
-plt.ioff()
-plt.show()
+#env.render()
+#env.close()
+#plt.ioff()
+#plt.show()

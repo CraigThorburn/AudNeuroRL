@@ -1,24 +1,35 @@
 import numpy
+import random
 class Vocabulary(object):
 
     def __init__(self, sample_size, calculation_size):
         self.sample_size = sample_size
         self.calculation_size = calculation_size
+        self.word_vector = []
         self.memory = []
+        self.previous_word = []
 
     def push(self, word):
         """Saves a word."""
         self.memory.append(word)
 
+    def new_episode(self):
+        self.word_vector = []
+        self.previous_word = []
+
     def get_reward(self,new_word):
         if len(self.memory)==0:
-            return 0
+            return 0.0
         samples = random.sample(self.memory, self.calculation_size)
-        rewards = []
+        dists = []
         for s in samples:
-            rewards.append(self.levenshteinDistanceDP(new_word, s))
-
-        return(max(rewards))
+            dists.append(self.levenshteinDistanceDP(new_word, s))
+            min_dist = min(dists)
+            if min_dist==0:
+                reward = 2
+            else:
+                reward = 1/min_dist
+        return reward
 
 
     def __len__(self):
@@ -62,3 +73,18 @@ class Vocabulary(object):
             for t2 in range(token2Length + 1):
                 print(int(distances[t1][t2]), end=" ")
             print()
+
+    def step(self, action, state):
+        self.word_vector.append(state)
+        if action == 0:
+            reward = 0
+        elif action == 1:
+            reward = self.get_reward(self.word_vector)
+            self.push(self.word_vector)
+            self.previous_word = self.word_vector
+            self.word_vector = []
+        return reward
+
+    def get_previous_word(self, vectors2phones):
+        w = ''.join([vectors2phones[str(s.data.numpy())] + ' ' for s in self.previous_word])
+        return w
