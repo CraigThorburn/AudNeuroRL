@@ -22,16 +22,16 @@ BATCH_SIZE = 128
 GAMMA = 0.999
 EPS_START = 0.9
 EPS_END = 0.05
-EPS_DECAY = 200
+EPS_DECAY = 20000
 TARGET_UPDATE = 10
 
-VOCAB_SAMPLE = 10
+VOCAB_SAMPLE = 20
 VOCAB_CALCULATE = 1
 
-DATA_FILE = '/mnt/c/files/research/projects/aud_neuro/data/WSJ_phones_test.txt'
+DATA_FILE = '/mnt/c/files/research/projects/aud_neuro/data/WSJ_phones.txt'
 PHONES = '/mnt/c/files/research/projects/aud_neuro/data/phones.txt'
 
-to_print = True
+to_print = False
 
 def optimize_model():
 
@@ -91,8 +91,8 @@ def select_action(state):
             # found, so we pick action with the larger expected reward.
             return policy_net(state).max(0)[1].view(1, 1)
     else:
-        return torch.tensor([[random.randrange(n_actions)]], device=device, dtype=torch.long)
-
+        action =  torch.tensor([[random.randrange(n_actions)]], device=device, dtype=torch.long)
+        return action
 # set up matplotlib
 is_ipython = 'inline' in matplotlib.get_backend()
 if is_ipython:
@@ -183,6 +183,13 @@ for i_episode in range(num_episodes):
     if i_episode % TARGET_UPDATE == 0:
         target_net.load_state_dict(policy_net.state_dict())
 
+    if i_episode % 100 == 0:
+        vocab_size, avg_size = vocab.get_info()
+
+        print('episode: '+str(i_episode) +', vocab size: '+str(vocab_size)+ ', average word size: ' + str(avg_size))
+        eps_threshold = EPS_END + (EPS_START - EPS_END) * \
+                        math.exp(-1. * steps_done / EPS_DECAY)
+        print()
 print('Complete')
 #env.render()
 #env.close()

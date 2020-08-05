@@ -1,5 +1,6 @@
 import numpy
 import random
+import math
 class Vocabulary(object):
 
     def __init__(self, sample_size, calculation_size):
@@ -20,15 +21,20 @@ class Vocabulary(object):
     def get_reward(self,new_word):
         if len(self.memory)==0:
             return 0.0
-        samples = random.sample(self.memory, self.calculation_size)
+        if self.sample_size > len(self.memory):
+            this_sample = len(self.memory)
+        else:
+            this_sample = self.sample_size
+        samples = random.sample(self.memory, this_sample)
         dists = []
         for s in samples:
             dists.append(self.levenshteinDistanceDP(new_word, s))
+            length = len(new_word)
             min_dist = min(dists)
             if min_dist==0:
-                reward = 2
+                reward = 2*math.exp(length)
             else:
-                reward = 1/min_dist
+                reward = (1/min_dist)*math.exp(length)
         return reward
 
 
@@ -88,3 +94,11 @@ class Vocabulary(object):
     def get_previous_word(self, vectors2phones):
         w = ''.join([vectors2phones[str(s.data.numpy())] + ' ' for s in self.previous_word])
         return w
+
+    def get_info(self):
+        vocab_size = self.__len__()
+        total_size = 0.0
+        for w in self.memory:
+            total_size+=len(w)
+        avg_size = total_size/vocab_size
+        return vocab_size, avg_size
