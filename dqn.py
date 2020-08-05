@@ -4,6 +4,7 @@ import torch.nn.functional as F
 class DQN(nn.Module):
 
     def __init__(self, inputs,  outputs):
+
         super(DQN, self).__init__()
         self.lin1 = nn.Linear(inputs, 30)
         self.sm1 = nn.Softmax()

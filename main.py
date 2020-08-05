@@ -28,10 +28,10 @@ TARGET_UPDATE = 10
 VOCAB_SAMPLE = 20
 VOCAB_CALCULATE = 1
 
-DATA_FILE = '/mnt/c/files/research/projects/aud_neuro/data/WSJ_phones.txt'
+DATA_FILE = '/mnt/c/files/research/projects/aud_neuro/data/WSJ_phones_test.txt'
 PHONES = '/mnt/c/files/research/projects/aud_neuro/data/phones.txt'
 
-to_print = False
+to_print = True
 
 def optimize_model():
 
@@ -49,14 +49,26 @@ def optimize_model():
                                           batch.next_state)), device=device, dtype=torch.bool)
     non_final_next_states = torch.stack(tuple([s for s in batch.next_state
                                                 if s is not None]))
+    non_final_h0 = torch.stack(tuple([h[0] for h in batch.next_hidden
+                                               if h is not None]))
+    non_final_c0 = torch.stack(tuple([c[1] for c in batch.next_hidden
+                                               if c is not None]))
+    non_final_hidden = (non_final_h0, non_final_c0)
+
+
     state_batch = torch.stack(batch.state)
     action_batch = torch.cat(batch.action)
     reward_batch = torch.cat(batch.reward)
+    h0_batch = torch.cat(tuple([h[0] for h in batch.hidden]))
+    c0_batch = torch.cat(tuple([h[1] for h in batch.hidden]))
+    hidden_batch = (h0_batch, c0_batch)
 
     # Compute Q(s_t, a) - the model computes Q(s_t), then we select the
     # columns of actions taken. These are the actions which would've been taken
     # for each batch state according to policy_net
-    state_action_values = policy_net(state_batch).gather(1, action_batch)
+    state_action_values, _ = policy_net(state_batch, hidden_batch)
+    state_action_values = state_action_values.gather(1, action_batch)
+#TODO: Fix state_action_values.gather() Dimensions not matching
 
     # Compute V(s_{t+1}) for all next states.
     # Expected values of actions for non_final_next_states are computed based
@@ -64,10 +76,14 @@ def optimize_model():
     # This is merged based on the mask, such that we'll have either the expected
     # state value or 0 in case the state was final.
     next_state_values = torch.zeros(BATCH_SIZE, device=device)
-    next_state_values[non_final_mask] = target_net(non_final_next_states).max(1)[0].detach()
+    next_state_values_network, _ = target_net(non_final_next_states, non_final_hidden)
+
+    next_state_values[non_final_mask] = next_state_values_network.max(1)[0].detach()
+# TODO: Fix next_state_values Dimensions not matching
+
     # Compute the expected Q values
     expected_state_action_values = (next_state_values * GAMMA) + reward_batch
-
+# TODO: Make sure loss is functioning correctly
     # Compute Huber loss
     loss = F.smooth_l1_loss(state_action_values.double(), expected_state_action_values.unsqueeze(1).double())
     loss = loss.double()
@@ -78,25 +94,27 @@ def optimize_model():
         param.grad.data.clamp_(-1, 1)
     optimizer.step()
 
-def select_action(state):
+def select_action(state, hidden):
     global steps_done
     sample = random.random()
     eps_threshold = EPS_END + (EPS_START - EPS_END) * \
         math.exp(-1. * steps_done / EPS_DECAY)
     steps_done += 1
-    if sample > eps_threshold:
-        with torch.no_grad():
+    with torch.no_grad():
             # t.max(1) will return largest column value of each row.
             # second column on max result is index of where max element was
             # found, so we pick action with the larger expected reward.
-            return policy_net(state).max(0)[1].view(1, 1)
+        network_return, hidden = policy_net(state, hidden)
+        network_return = network_return.max(-1)[1].view(1, 1)
+    if sample > eps_threshold:
+        action = network_return
     else:
         action =  torch.tensor([[random.randrange(n_actions)]], device=device, dtype=torch.long)
-        return action
+    return action, hidden
 # set up matplotlib
-is_ipython = 'inline' in matplotlib.get_backend()
-if is_ipython:
-    from IPython import display
+#is_ipython = 'inline' in matplotlib.get_backend()
+#if is_ipython:
+#    from IPython import display
 
 plt.ion()
 
@@ -134,6 +152,9 @@ vocab = Vocabulary(VOCAB_SAMPLE, VOCAB_CALCULATE)
 
 for i_episode in range(num_episodes):
     # Initialize the environment and state
+    h0 = torch.randn(1,1,30).to(device)
+    c0 = torch.randn(1,1,30).to(device)
+    hidden = (h0,c0)
 
     current_episode = get_episode(input_data, i_episode)
     state, symbol = get_state(current_episode, 0, phones2vectors)
@@ -146,7 +167,7 @@ for i_episode in range(num_episodes):
 
     for t in count():
         # Select and perform an action
-        action = select_action(state)
+        action, next_hidden = select_action(state, hidden)
 
         reward = vocab.step(action, state)
 
@@ -165,13 +186,14 @@ for i_episode in range(num_episodes):
         if not done:
             next_state, symbol = get_state(current_episode, t+1, phones2vectors)
         else:
-            next_state, symbol = None, None
+            next_state, symbol, next_hidden = None, None, (None, None)
 
         # Store the transition in memory
-        memory.push(state, action, next_state, reward)
+        memory.push(state, action, next_state, reward, hidden, next_hidden)
 
         # Move to the next state
         state = next_state
+        hidden = next_hidden
 
         # Perform one step of the optimization (on the target network)
         optimize_model()

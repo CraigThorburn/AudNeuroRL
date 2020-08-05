@@ -1,3 +1,5 @@
+#TODO: subsume these functions within Vocabulary
+
 import numpy as np
 import torch
 def initialize_data(DATA_FILE, PHONES):
