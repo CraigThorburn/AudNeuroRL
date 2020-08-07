@@ -9,12 +9,20 @@ class Vocabulary(object):
         self.calculation_size = calculation_size
         self.word_vector = []
         self.memory = []
+        self.unique_words = {}
         self.previous_word = []
 
 
     def push(self, word):
         """Saves a word."""
         self.memory.append(word)
+
+    def push_to_unique_words(self, word_string):
+        if word_string not in self.unique_words.keys():
+            self.unique_words[word_string]=1
+        else:
+            self.unique_words[word_string] +=1
+
 
     def reset_local_memory(self):
         self.word_vector = []
@@ -103,4 +111,12 @@ class Vocabulary(object):
         for w in self.memory:
             total_size+=len(w)
         avg_size = total_size/vocab_size
-        return vocab_size, avg_size
+        unique_words = len(self.unique_words.keys())
+        return vocab_size, avg_size, unique_words
+
+    def save_vocab(self, filename):
+        with open(filename, 'w+') as f:
+            f.write(''.join([u + str(self.unique_words[u])+ '\n' for u in self.unique_words.keys()]))
+            # TODO: Save words in order
+
+# TODO: Fix variable names around unique words
