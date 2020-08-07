@@ -4,17 +4,19 @@ import math
 class Vocabulary(object):
 
     def __init__(self, sample_size, calculation_size):
+
         self.sample_size = sample_size
         self.calculation_size = calculation_size
         self.word_vector = []
         self.memory = []
         self.previous_word = []
 
+
     def push(self, word):
         """Saves a word."""
         self.memory.append(word)
 
-    def new_episode(self):
+    def reset_local_memory(self):
         self.word_vector = []
         self.previous_word = []
 
