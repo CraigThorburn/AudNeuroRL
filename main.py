@@ -27,8 +27,16 @@ TARGET_UPDATE = 10
 VOCAB_SAMPLE = 20
 VOCAB_CALCULATE = 1
 
-DATA_FILE = '/mnt/c/files/research/projects/aud_neuro/data/WSJ_phones_test.txt'
-PHONE_FILE = '/mnt/c/files/research/projects/aud_neuro/data/phones.txt'
+host = 'local'
+
+if host == 'local':
+    ROOT = '/mnt/c/files/research/projects/aud_neuro/data/'
+elif host == 'clip':
+    ROOT = '/fs/clip-realspeech/projects/aud_neuro/models/dqn/WSJ/'
+
+DATA_FILE = ROOT + 'test_utts.txt'
+PHONE_FILE = ROOT + 'test_phones.txt'
+VOCAB_FILENAME = ROOT + 'test_vocab.txt'
 
 to_print = False
 
@@ -66,7 +74,6 @@ def optimize_model():
     # for each batch state according to policy_net
     state_action_values, _ = policy_net(state_batch, hidden_batch)
     state_action_values = state_action_values.reshape(128, 2).gather(1, action_batch)
-    # TODO: Fix state_action_values.gather() Dimensions not matching
 
     # Compute V(s_{t+1}) for all next states.
     # Expected values of actions for non_final_next_states are computed based
@@ -77,7 +84,6 @@ def optimize_model():
     next_state_values_network, _ = target_net(non_final_next_states, non_final_hidden)
 
     next_state_values[non_final_mask] = next_state_values_network.max(-1)[0]
-    # TODO: Fix next_state_values Dimensions not matching
 
     # Compute the expected Q values
     expected_state_action_values = (next_state_values * GAMMA) + reward_batch
@@ -151,6 +157,7 @@ steps_done = 0
 episode_durations = []
 vocab = Vocabulary(VOCAB_SAMPLE, VOCAB_CALCULATE)
 
+print('running')
 for i_episode in range(num_episodes):
     # Initialize the environment and state
     h0 = torch.randn(1, 1, 30).to(device)
@@ -179,6 +186,7 @@ for i_episode in range(num_episodes):
             else:
                 print('state:  ' + symbol + ', action: segment')
                 print('word: ' + vocab.get_previous_word(data.get_vectors2phones()) + ', reward: ' + str(reward))
+        vocab.push_to_unique_words(vocab.get_previous_word(data.get_vectors2phones()))
 
         reward = torch.tensor([reward], device=device, dtype=torch.float64)
 
@@ -215,15 +223,25 @@ for i_episode in range(num_episodes):
         target_net.load_state_dict(policy_net.state_dict())
 
     if i_episode % 100 == 0:
-        vocab_size, avg_size = vocab.get_info()
+        vocab_size, avg_size, unique_words = vocab.get_info()
 
         print(
-            'episode: ' + str(i_episode) + ', vocab size: ' + str(vocab_size) + ', average word size: ' + str(avg_size))
+            'episode: ' + str(i_episode) + ', vocab size: ' + str(vocab_size) + ', average word size: ' + str(avg_size) \
+            + ', unique_words: ' + str(unique_words))
         eps_threshold = EPS_END + (EPS_START - EPS_END) * \
                         math.exp(-1. * steps_done / EPS_DECAY)
         print()
-print('Complete')
+print('model complete')
+vocab_size, avg_size, unique_words = vocab.get_info()
+print('total episodes: ' + str(i_episode) + ', vocab size: ' + str(vocab_size) + ', average word size: ' + str(avg_size) \
+            + ', unique words: ' + str(unique_words))
+print('saving vocab')
+vocab.save_vocab(VOCAB_FILENAME)
+print('vocab saved')
+print('done')
 # env.render()
 # env.close()
 # plt.ioff()
 # plt.show()
+
+#TODO: Get rid of empty words
