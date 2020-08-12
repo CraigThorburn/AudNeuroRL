@@ -3,7 +3,7 @@ import random
 import math
 class Vocabulary(object):
 
-    def __init__(self, sample_size, calculation_size):
+    def __init__(self, sample_size, calculation_size, mem_limit, token_type):
 
         self.sample_size = sample_size
         self.calculation_size = calculation_size
@@ -11,11 +11,31 @@ class Vocabulary(object):
         self.memory = []
         self.unique_words = {}
         self.previous_word = []
+        self.mem_limit = mem_limit
+        self.token_type = token_type
+        if token_type == 'token':
+            self.push = self.push_token
+        elif token_type == 'item':
+            self.push = self.push_token
 
-
-    def push(self, word):
+    def push_token(self, word):
         """Saves a word."""
         self.memory.append(word)
+        if len(self.memory) > self.mem_limit:
+            self.memory.pop(0)
+
+    def push_type(self, word):
+        """Saves a word."""
+        if word not in self.memory:
+            self.memory.append(word)
+        if len(self.memory) > self.mem_limit:
+            self.memory.pop(0)
+
+   # def push(self, word):
+    #    """Saves a word."""
+    #    self.memory.append(word)
+    #   if len(self.memory) > self.mem_limit:
+      #      self.memory.pop(0)
 
     def push_to_unique_words(self, word_string):
         if word_string not in self.unique_words.keys():
@@ -44,7 +64,7 @@ class Vocabulary(object):
             if min_dist==0:
                 reward = 2*math.exp(length)
             else:
-                reward = (1/min_dist)*math.exp(length)
+                reward = (1/min_dist)*math.exp(10*length)
         return reward
 
 
@@ -102,7 +122,7 @@ class Vocabulary(object):
         return reward
 
     def get_previous_word(self, vectors2phones):
-        w = ''.join([vectors2phones[str(s.data.numpy())] + ' ' for s in self.previous_word])
+        w = ''.join([vectors2phones[str(s.cpu().data.numpy())] + ' ' for s in self.previous_word])
         return w
 
     def get_info(self):
