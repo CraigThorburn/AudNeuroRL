@@ -3,6 +3,7 @@
 # import numpy as np
 # import matplotlib
 import matplotlib.pyplot as plt
+import sys
 # from collections import namedtuple
 from itertools import count
 
@@ -16,6 +17,10 @@ from DQN import *
 # from process_data import *
 from Vocabulary import *
 from Data import *
+import time
+
+if len(sys.argv) > 1:
+    host = sys.argv[1]
 
 BATCH_SIZE = 128
 GAMMA = 0.999
@@ -23,20 +28,24 @@ EPS_START = 0.9
 EPS_END = 0.05
 EPS_DECAY = 20000
 TARGET_UPDATE = 10
+LR = 0.9
 
 VOCAB_SAMPLE = 20
 VOCAB_CALCULATE = 1
 
-host = 'local'
+MEM_SIZE = 50000
+TOKEN_TYPE = 'token'
+
+# host = 'local'
 
 if host == 'local':
     ROOT = '/mnt/c/files/research/projects/aud_neuro/data/'
 elif host == 'clip':
     ROOT = '/fs/clip-realspeech/projects/aud_neuro/models/dqn/WSJ/'
 
-DATA_FILE = ROOT + 'test_utts.txt'
-PHONE_FILE = ROOT + 'test_phones.txt'
-VOCAB_FILENAME = ROOT + 'test_vocab.txt'
+DATA_FILE = ROOT + 'WSJ_utts.txt'
+PHONE_FILE = ROOT + 'WSJ_phones.txt'
+VOCAB_FILENAME = ROOT + 'WSJ_vocab.txt'
 
 to_print = False
 
@@ -49,6 +58,7 @@ def optimize_model():
     # detailed explanation). This converts batch-array of Transitions
     # to Transition of batch-arrays.
     batch = Transition(*zip(*transitions))
+    policy_net.train()
 
     # Compute a mask of non-final states and concatenate the batch elements
     # (a final state would've been the one after which simulation ended)
@@ -88,11 +98,14 @@ def optimize_model():
     # Compute the expected Q values
     expected_state_action_values = (next_state_values * GAMMA) + reward_batch
     # TODO: Make sure loss is functioning correctly
+    policy_net.train()
+
     # Compute Huber loss
     loss = F.smooth_l1_loss(state_action_values.double(), expected_state_action_values.unsqueeze(1).double())
     loss = loss.double()
     # Optimize the model
     optimizer.zero_grad()
+   # print(policy_net.training)
     loss.backward()
     for param in policy_net.parameters():
         param.grad.data.clamp_(-1, 1)
@@ -127,6 +140,7 @@ plt.ion()
 
 # if gpu is to be used
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print('using device ' + str(device))
 
 transition = namedtuple('Transition',
                         ('state', 'action', 'next_state', 'reward'))
@@ -141,23 +155,31 @@ print('data loaded')
 # input_data, phones2vectors, vectors2phones = initialize_data(DATA_FILE, PHONES)
 
 num_inputs = data.num_inputs()  # len(phones2vectors.keys())
+print('num inputs: ' + str(num_inputs))
 num_episodes = len(data)  # len(input_data)
+print('num episodes: ' + str(num_episodes))
 
 policy_net = DQN(num_inputs, n_actions).to(device)
 target_net = DQN(num_inputs, n_actions).to(device)
 target_net.load_state_dict(policy_net.state_dict())
 target_net.eval()
 
-optimizer = optim.RMSprop(policy_net.parameters())
+#CHANGE: from RMSprop to SGD
+optimizer = optim.SGD(policy_net.parameters(), lr = 0.9)
 memory = ReplayMemory(10000)
+torch.backends.cudnn.enabled = False
+#TODO: Check what exactly this is doing ^^^
+
+policy_net.train()
 
 print('model and memory initialized')
 
 steps_done = 0
 episode_durations = []
-vocab = Vocabulary(VOCAB_SAMPLE, VOCAB_CALCULATE)
+vocab = Vocabulary(VOCAB_SAMPLE, VOCAB_CALCULATE, MEM_SIZE, TOKEN_TYPE)
 
 print('running')
+tic = time.time()
 for i_episode in range(num_episodes):
     # Initialize the environment and state
     h0 = torch.randn(1, 1, 30).to(device)
@@ -166,7 +188,7 @@ for i_episode in range(num_episodes):
 
     # current_episode = get_episode(input_data, i_episode)
     episode_length = data.current_episode_length()
-    state, symbol = data.get_state(), data.get_symbol()  # current_episode, 0, phones2vectors)
+    state, symbol = data.get_state().to(device), data.get_symbol()  # current_episode, 0, phones2vectors)
     vocab.reset_local_memory()
 
     if to_print:
@@ -194,7 +216,7 @@ for i_episode in range(num_episodes):
         # Observe new state
         if not done:
             data.advance_state()
-            next_state, symbol = state, symbol = data.get_state(), data.get_symbol()
+            next_state, symbol = state, symbol = data.get_state().to(device), data.get_symbol()
         else:
             h0 = torch.zeros(1, 1, 30).to(device)
             c0 = torch.zeros(1, 1, 30).to(device)
@@ -209,6 +231,7 @@ for i_episode in range(num_episodes):
         hidden = next_hidden
 
         # Perform one step of the optimization (on the target network)
+        policy_net.train()
         optimize_model()
         if done:
             episode_durations.append(t + 1)
@@ -225,16 +248,22 @@ for i_episode in range(num_episodes):
     if i_episode % 100 == 0:
         vocab_size, avg_size, unique_words = vocab.get_info()
 
-        print(
-            'episode: ' + str(i_episode) + ', vocab size: ' + str(vocab_size) + ', average word size: ' + str(avg_size) \
-            + ', unique_words: ' + str(unique_words))
         eps_threshold = EPS_END + (EPS_START - EPS_END) * \
                         math.exp(-1. * steps_done / EPS_DECAY)
-        print()
+        toc = time.time()
+        time_passed = toc - tic
+        time_remaining = ((time_passed / (i_episode + 1)) * num_episodes - time_passed) / 60
+
+        print(
+            'episode: ' + str(i_episode) + ', vocab size: ' + str(vocab_size) + ', average word size: ' + str(avg_size) \
+            + ', unique_words: ' + str(unique_words) + ', percent complete: ' + str(
+                math.ceil((i_episode / num_episodes))*100) + \
+            ', time remaining: ' + str(int(time_remaining)) + ' minutes')
+
 print('model complete')
 vocab_size, avg_size, unique_words = vocab.get_info()
 print('total episodes: ' + str(i_episode) + ', vocab size: ' + str(vocab_size) + ', average word size: ' + str(avg_size) \
-            + ', unique words: ' + str(unique_words))
+      + ', unique words: ' + str(unique_words))
 print('saving vocab')
 vocab.save_vocab(VOCAB_FILENAME)
 print('vocab saved')
@@ -244,4 +273,4 @@ print('done')
 # plt.ioff()
 # plt.show()
 
-#TODO: Get rid of empty words
+# TODO: Get rid of empty words
