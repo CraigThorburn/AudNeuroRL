@@ -7,10 +7,10 @@ class DQN(nn.Module):
     def __init__(self, inputs,  outputs):
 
         super(DQN, self).__init__()
-        self.lin1 = nn.Linear(inputs, 14)
-        #self.lin2 = nn.Linear(14, 14)
-        self.lstm = nn.LSTM(14,112, 1)
-        self.lin3 = nn.Linear(112,outputs)
+        self.lin1 = nn.Linear(inputs, 30)
+        self.lin2 = nn.Linear(30, 30)
+        self.lstm = nn.LSTM(30,30, 1)
+        self.lin3 = nn.Linear(30,outputs)
 
         # Number of Linear input connections depends on output of conv2d layers
         # and therefore the input image size, so compute it.
@@ -28,15 +28,15 @@ class DQN(nn.Module):
 
         #x = torch.from_numpy(x).float()
         x = F.relu(self.lin1(x))
-        #x = F.relu(self.lin2(x))
+        x = F.relu(self.lin2(x))
 
         # This means that we are looking at a batch
         if x.dim() !=1:
-            x = x.reshape(1, x.size()[0], 14)
-            h0 = hidden[0].reshape(1, hidden[0].size()[0], 112)
-            c0 = hidden[1].reshape(1, hidden[1].size()[0], 112)
+            x = x.reshape(1, x.size()[0], 30)
+            h0 = hidden[0].reshape(1, hidden[0].size()[0], 30)
+            c0 = hidden[1].reshape(1, hidden[1].size()[0], 30)
         else:
-            x = x.reshape(1,1,14)
+            x = x.reshape(1,1,30)
             h0 = hidden[0]
             c0 = hidden[1]
 

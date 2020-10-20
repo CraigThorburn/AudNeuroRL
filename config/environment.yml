@@ -11,3 +11,4 @@ dependencies:
     - gym
     - pillow
     - -freeglut3-dev
+    - pyyaml

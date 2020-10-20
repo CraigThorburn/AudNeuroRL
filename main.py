@@ -18,36 +18,25 @@ from DQN import *
 from Vocabulary import *
 from Data import *
 import time
+from params import *
+import argparse
 
-if len(sys.argv) > 1:
-    host = sys.argv[1]
+parser = argparse.ArgumentParser()
+parser.add_argument("-debug", help="run with debugging output on")
+parser.add_argument("host", help="server on which code is run")
+parser.add_argument("-overwrite", help="overwrite any existing output files")
+args = parser.parse_args()
 
-BATCH_SIZE = 128
-GAMMA = 0.999
-EPS_START = 0.9
-EPS_END = 0.05
-EPS_DECAY = 20000
-TARGET_UPDATE = 10
-LR = 0.9
-
-VOCAB_SAMPLE = 20
-VOCAB_CALCULATE = 1
-
-MEM_SIZE = 50000
-TOKEN_TYPE = 'token'
-
-# host = 'local'
-
-if host == 'local':
+if args.host == 'local':
     ROOT = '/mnt/c/files/research/projects/aud_neuro/data/'
-elif host == 'clip':
+elif args.host == 'clip':
     ROOT = '/fs/clip-realspeech/projects/aud_neuro/models/dqn/WSJ/'
 
-DATA_FILE = ROOT + 'WSJ_utts.txt'
-PHONE_FILE = ROOT + 'WSJ_phones.txt'
-VOCAB_FILENAME = ROOT + 'WSJ_vocab.txt'
+to_print = args.debug
 
-to_print = False
+DATA_PATH = ROOT + DATA_FILE
+PHONE_PATH = ROOT + PHONE_FILE
+VOCAB_PATH = ROOT + VOCAB_FILE
 
 
 def optimize_model():
@@ -105,7 +94,7 @@ def optimize_model():
     loss = loss.double()
     # Optimize the model
     optimizer.zero_grad()
-   # print(policy_net.training)
+    # print(policy_net.training)
     loss.backward()
     for param in policy_net.parameters():
         param.grad.data.clamp_(-1, 1)
@@ -136,7 +125,6 @@ def select_action(state, hidden):
 # if is_ipython:
 #    from IPython import display
 
-plt.ion()
 
 # if gpu is to be used
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -149,10 +137,10 @@ n_actions = 2
 
 # Get length of file to find number of episodes
 print('loading data')
-data = Data(DATA_FILE, PHONE_FILE)
+data = Data(DATA_PATH, PHONE_PATH)
 data.load_data()
 print('data loaded')
-# input_data, phones2vectors, vectors2phones = initialize_data(DATA_FILE, PHONES)
+# input_data, phones2vectors, vectors2phones = initialize_data(DATA_PATH, PHONES)
 
 num_inputs = data.num_inputs()  # len(phones2vectors.keys())
 print('num inputs: ' + str(num_inputs))
@@ -164,27 +152,42 @@ target_net = DQN(num_inputs, n_actions).to(device)
 target_net.load_state_dict(policy_net.state_dict())
 target_net.eval()
 
-#CHANGE: from RMSprop to SGD
-optimizer = optim.SGD(policy_net.parameters(), lr = 0.9)
+# CHANGE: from RMSprop to SGD
+optimizer = optim.SGD(policy_net.parameters(), lr=0.9)
 memory = ReplayMemory(10000)
 torch.backends.cudnn.enabled = False
-#TODO: Check what exactly this is doing ^^^
+# TODO: Check what exactly this is doing ^^^
 
 policy_net.train()
-
 print('model and memory initialized')
 
 steps_done = 0
 episode_durations = []
-vocab = Vocabulary(VOCAB_SAMPLE, VOCAB_CALCULATE, MEM_SIZE, TOKEN_TYPE)
+vocab = LoadedVocabulary(VOCAB_SAMPLE, VOCAB_CALCULATE, MEM_SIZE, TOKEN_TYPE)
+vocab.load_vocabulary(VOCAB_PATH, data.get_phones2vectors())
+# vocab = PhoneVocabulary(VOCAB_SAMPLE, VOCAB_CALCULATE, MEM_SIZE, TOKEN_TYPE)
 
+if args.overwrite:
+    write_method = 'w'
+else:
+    write_method = 'x'
+outfile = open(ROOT + CORPUS + '_output.txt', write_method)
+datafile = open(ROOT + CORPUS + '_data.txt', write_method)
+outfile.close()
+datafile.close()
+
+to_output = []
+to_data = []
 print('running')
+
 tic = time.time()
 for i_episode in range(num_episodes):
     # Initialize the environment and state
-    h0 = torch.randn(1, 1, 30).to(device)
-    c0 = torch.randn(1, 1, 30).to(device)
+    h0 = torch.randn(1, 1, 112).to(device)
+    c0 = torch.randn(1, 1, 112).to(device)
     hidden = (h0, c0)
+
+    total_reward = 0
 
     # current_episode = get_episode(input_data, i_episode)
     episode_length = data.current_episode_length()
@@ -199,27 +202,41 @@ for i_episode in range(num_episodes):
     for t in count():
         # Select and perform an action
 
-        action, next_hidden = select_action(state, hidden)
-        reward = vocab.step(action, state)
+        done = t + 1 == episode_length - 1
 
-        if to_print:
-            if action == 0:
-                print('state:  ' + symbol + ', action: continue')
-            else:
-                print('state:  ' + symbol + ', action: segment')
-                print('word: ' + vocab.get_previous_word(data.get_vectors2phones()) + ', reward: ' + str(reward))
-        vocab.push_to_unique_words(vocab.get_previous_word(data.get_vectors2phones()))
+        action, next_hidden = select_action(state, hidden)
+        if done:
+            action = torch.tensor([[1]], device=device, dtype=torch.long)
+        reward = vocab.step(action, state)
+        total_reward += reward
+        ### IMPORTANT: Reset hidden state if segment
+        if action == 1:
+            h0 = torch.randn(1, 1, 112).to(device)
+            c0 = torch.randn(1, 1, 112).to(device)
+            next_hidden = (h0, c0)
+
+        if action == 0:
+            pass
+            # print('state:  ' + symbol + ', action: continue')
+        else:
+            eps_threshold = EPS_END + (EPS_START - EPS_END) * \
+                            math.exp(-1. * steps_done / EPS_DECAY)
+            if to_print:
+                # print('state:  ' + symbol + ', action: segment')
+                print('word: ' + vocab.get_word_string(vocab.get_previous_word(), data.get_vectors2phones()) + \
+                      ', reward: ' + str(reward) + ', threshold: ' + str(eps_threshold))
+            to_output.append('word: ' + vocab.get_word_string(vocab.get_previous_word(), data.get_vectors2phones()) + \
+                             ', reward: ' + str(reward))
 
         reward = torch.tensor([reward], device=device, dtype=torch.float64)
 
-        done = t + 1 == episode_length - 1
         # Observe new state
         if not done:
             data.advance_state()
             next_state, symbol = state, symbol = data.get_state().to(device), data.get_symbol()
         else:
-            h0 = torch.zeros(1, 1, 30).to(device)
-            c0 = torch.zeros(1, 1, 30).to(device)
+            h0 = torch.zeros(1, 1, 112).to(device)
+            c0 = torch.zeros(1, 1, 112).to(device)
             next_hidden = (h0, c0)
             next_state, symbol, next_hidden = None, None, None
 
@@ -235,6 +252,10 @@ for i_episode in range(num_episodes):
         optimize_model()
         if done:
             episode_durations.append(t + 1)
+            to_output.append('\n')
+            to_data.append([t + 1, total_reward])
+
+            total_reward = 0
 
             if i_episode + 1 != num_episodes:
                 data.advance_episode()
@@ -245,8 +266,20 @@ for i_episode in range(num_episodes):
     if i_episode % TARGET_UPDATE == 0:
         target_net.load_state_dict(policy_net.state_dict())
 
-    if i_episode % 100 == 0:
-        vocab_size, avg_size, unique_words = vocab.get_info()
+    if i_episode % UPDATES == 0:
+        outfile = open(ROOT + CORPUS + '_output.txt', 'a+')
+        outfile.write(''.join([i + '|' for i in to_output]))
+        outfile.close()
+        to_out = []
+
+        datafile = open(ROOT + CORPUS + '_data.txt', 'a+')
+        datafile.write(''.join([str(i[0]) + ' ' + str(i[1]) + '\n' for i in to_data]))
+        datafile.close()
+        to_data = []
+
+        torch.save(policy_net.state_dict(), ROOT + '/checkpoints/' + CORPUS + 'model.pt')
+
+        vocab_size, avg_size = vocab.get_info()
 
         eps_threshold = EPS_END + (EPS_START - EPS_END) * \
                         math.exp(-1. * steps_done / EPS_DECAY)
@@ -256,16 +289,16 @@ for i_episode in range(num_episodes):
 
         print(
             'episode: ' + str(i_episode) + ', vocab size: ' + str(vocab_size) + ', average word size: ' + str(avg_size) \
-            + ', unique_words: ' + str(unique_words) + ', percent complete: ' + str(
-                math.ceil((i_episode / num_episodes))*100) + \
+            + ', percent complete: ' + str(
+                math.ceil((i_episode / num_episodes) * 100)) + \
             ', time remaining: ' + str(int(time_remaining)) + ' minutes')
 
 print('model complete')
-vocab_size, avg_size, unique_words = vocab.get_info()
-print('total episodes: ' + str(i_episode) + ', vocab size: ' + str(vocab_size) + ', average word size: ' + str(avg_size) \
-      + ', unique words: ' + str(unique_words))
+vocab_size, avg_size = vocab.get_info()
+print(
+    'total episodes: ' + str(i_episode) + ', vocab size: ' + str(vocab_size) + ', average word size: ' + str(avg_size))
 print('saving vocab')
-vocab.save_vocab(VOCAB_FILENAME)
+# vocab.save_vocab(VOCAB_PATH)
 print('vocab saved')
 print('done')
 # env.render()
@@ -273,4 +306,6 @@ print('done')
 # plt.ioff()
 # plt.show()
 
-# TODO: Get rid of empty words
+# TODO: Cuda issues on clip (loaded vocab is not going to device)
+# TODO: Reward is not cumulative over single episode
+# TODO: Memory is only cleared at end of episode
